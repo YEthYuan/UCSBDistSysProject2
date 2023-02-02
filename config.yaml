@@ -1,0 +1,32 @@
+clients:
+  - username: "A"
+    ip: "127.0.0.1"
+    port: 8001
+  - username: "B"
+    ip: "127.0.0.1"
+    port: 8002
+  - username: "C"
+    ip: "127.0.0.1"
+    port: 8003
+  - username: "D"
+    ip: "127.0.0.1"
+    port: 8004
+  - username: "E"
+    ip: "127.0.0.1"
+    port: 8005
+edges:
+  - node: "A"
+    to: ["B"]
+    from: ["B", "D"]
+  - node: "B"
+    to: ["A", "D"]
+    from: ["A", "C", "D", "E"]
+  - node: "C"
+    to: ["B"]
+    from: ["D"]
+  - node: "D"
+    to: ["A", "B", "C", "E"]
+    from: ["B", "E"]
+  - node: "E"
+    to: ["B", "D"]
+    from: ["D"]
