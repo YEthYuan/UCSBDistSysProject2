@@ -112,6 +112,10 @@ class Client:
             self.send_udp_packet(message, *addr)
             print(f"Token has been sent to user {to}!")
 
+    def clear_local_history(self, initiator: str):
+        self.channel_flag.pop(initiator, None)
+        self.snapshots.pop(initiator, None)
+
     def process_marker(self, payload: dict):
         initiator = payload['initiator']
         sender = payload['sender']
@@ -159,6 +163,8 @@ class Client:
                 self.global_snapshots.append(self.global_snapshot)
 
         else:
+            self.display_snapshot(initiator)
+
             payload = json.dumps(self.snapshots[initiator])
             message = self.generate_packet_to_send(payload, "snapshot")
             message = json.dumps(message)
@@ -167,6 +173,39 @@ class Client:
             self.send_udp_packet(message, *self.user_list[initiator])
             print(f"The snapshot on {self.username} has successfully been sent to {initiator}")
 
+        self.clear_local_history(initiator)
+
+    def display_snapshot(self, initiator: str):
+        channels_info = self.process_channels_info(initiator)
+        print()
+        print(f" --- Snapshot Initialed by {initiator} details ---")
+        print(f"Local State: {self.holds_token(self.snapshots[initiator]['my_state'])}")
+        print("Channels State: ")
+        for k, v in channels_info.items():
+            print(f"[{k}] ---> [{self.username}]: {self.holds_token(v)}")
+        print()
+
+    def display_global_snapshots(self):
+        for k, v in self.global_snapshot.items():
+            print(f"Snapshot of client {k}:")
+            print(f"Local state: {v['my_state']}")
+            while not v['channels'].empty():
+                msg = v['channels'].pop()
+                if msg['type'] == 'token':
+                    print(f"Channel [{msg['from']}] --> [{k}]: {self.holds_token(True)}")
+
+    def process_channels_info(self, initiator: str):
+        ret = {}
+        for c in self.in_list:
+            ret[c] = False
+
+        while not self.snapshots[initiator]['channels'].empty():
+            message = self.snapshots[initiator]['channels'].get()
+            if message['type'] == 'token':
+                ret[message['from']] = True
+
+        return ret
+
     def process_snapshot(self, payload: dict):
         creator = payload['creator']
         self.global_snapshot[creator] = payload
@@ -174,6 +213,12 @@ class Client:
         if all(self.global_snapshots_flag.values()):
             print("All local snapshots collected! Global snapshot done!")
             self.global_snapshots.append(self.global_snapshot)
+
+    def holds_token(self, state: bool):
+        if state:
+            return "[V] Has Token"
+        else:
+            return "[X] No Token"
 
     def generate_packet_to_send(self, msg_item: str, msg_type: str) -> dict:
         """
@@ -246,6 +291,9 @@ class Client:
     def process_recv_data(self, data):
         data = json.loads(data)
         self.temp_record(data)
+        self.process_messages(data)
+
+    def process_messages(self, data: dict):
         if data['type'] == 'token':
             print(f"==>Received token from {data['from']}. ")
             payload = data['item']
