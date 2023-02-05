@@ -26,9 +26,24 @@ class Client:
 
         self.token = False
         self.lose_prob = 0  # percentage of the probability to lose the token
-
+        self.channel_flag = {}
+        self.snapshots = {}
+        self.global_snapshots = []
+        self.global_snapshot = None
+        self.global_snapshots_flag = {}
 
         pass
+
+    def launch_snapshot(self):
+        print(f"==>Launching snapshots on client {self.username}")
+        self.global_snapshot = {}
+        self.global_snapshots_flag = {}
+        for u in self.user_list.keys():
+            self.global_snapshots_flag[u] = False
+        self.prepare_channels(initiator=self.username, sender=self.username)
+        self.snapshots[self.username]['my_state'] = self.token
+        self.snapshots[self.username]['creator'] = self.username
+        self.broadcast_marker(initiator=self.username)
 
     def load_config(self, path: str) -> dict:
         with open(path, 'r') as file:
@@ -98,7 +113,17 @@ class Client:
             print(f"Token has been sent to user {to}!")
 
     def process_marker(self, payload: dict):
-        pass
+        initiator = payload['initiator']
+        sender = payload['sender']
+
+        if initiator not in self.channel_flag:
+            self.prepare_channels(initiator, sender)
+            self.snapshots[initiator]['my_state'] = self.token
+            self.broadcast_marker(initiator)
+        else:
+            self.channel_flag[initiator][sender] = True
+            if all(self.channel_flag[initiator]):
+                self.summarize_snapshot(initiator)
 
     def broadcast_marker(self, initiator: str):
         payload = {
@@ -113,6 +138,42 @@ class Client:
         for to_name, to_addr in self.out_channels.items():
             self.send_udp_packet(message, *to_addr)
             print(f"MARKER has been sent to user {to_name}!")
+
+    def prepare_channels(self, initiator: str, sender: str):
+        new_flag = {}
+        new_queue = queue.Queue()
+        for in_channel in self.in_list:
+            new_flag[in_channel] = False
+        new_flag[sender] = True
+
+        self.channel_flag[initiator] = new_flag
+        self.snapshots[initiator]['channels'] = new_queue
+        self.snapshots[initiator]['creator'] = self.username
+
+    def summarize_snapshot(self, initiator: str):
+        if initiator == self.username:
+            self.global_snapshot[self.username] = self.snapshots[self.username]
+            self.global_snapshots_flag[self.username] = True
+            if all(self.global_snapshots_flag.values()):
+                print("All local snapshots collected! Global snapshot done!")
+                self.global_snapshots.append(self.global_snapshot)
+
+        else:
+            payload = json.dumps(self.snapshots[initiator])
+            message = self.generate_packet_to_send(payload, "snapshot")
+            message = json.dumps(message)
+            self.message_delay()
+
+            self.send_udp_packet(message, *self.user_list[initiator])
+            print(f"The snapshot on {self.username} has successfully been sent to {initiator}")
+
+    def process_snapshot(self, payload: dict):
+        creator = payload['creator']
+        self.global_snapshot[creator] = payload
+        self.global_snapshots_flag[creator] = True
+        if all(self.global_snapshots_flag.values()):
+            print("All local snapshots collected! Global snapshot done!")
+            self.global_snapshots.append(self.global_snapshot)
 
     def generate_packet_to_send(self, msg_item: str, msg_type: str) -> dict:
         """
@@ -156,7 +217,7 @@ class Client:
 
     def init_udp_recv_settings(self):
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_sock.bind(self.my_addr)
+        self.udp_sock.bind(self.addr)
         self.data_queue = queue.Queue()
 
     def start_listening(self):
@@ -175,8 +236,16 @@ class Client:
         self.stop_udp_thread = True
         self.udp_thread.join()
 
+    def temp_record(self, message: dict):
+        sender = message['from']
+        for initiator in self.snapshots.keys():
+            if self.channel_flag[initiator][sender] == False:
+                self.snapshots[initiator]['channels'].put(message)
+                print(f"==>Put the {message['type']} message from {sender} into the queue of {initiator}!")
+
     def process_recv_data(self, data):
         data = json.loads(data)
+        self.temp_record(data)
         if data['type'] == 'token':
             print(f"==>Received token from {data['from']}. ")
             payload = data['item']
@@ -187,8 +256,11 @@ class Client:
             payload = data['item']
             payload = json.loads(payload)
             self.process_marker(payload)
-        elif data['type'] == 'client-release':
-            pass
+        elif data['type'] == 'snapshot':
+            print(f"==>Received local snapshot from {data['from']}. ")
+            payload = data['item']
+            payload = json.loads(payload)
+            self.process_snapshot(payload)
         elif data['type'] == 'server-balance':
             pass
         elif data['type'] == 'server-status':
