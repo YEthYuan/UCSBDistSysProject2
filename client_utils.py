@@ -45,6 +45,17 @@ class Client:
         self.snapshots[self.username]['creator'] = self.username
         self.broadcast_marker(initiator=self.username)
 
+    def assign_token(self):
+        print(f"==>Assign a token to client {self.username}")
+        payload = {
+            'sender': self.username
+        }
+        self.process_token(payload)
+
+    def modify_lose_prob(self, value: int):
+        print(f"==>Set the lose token probability of client {self.username} to {value}%.")
+        self.lose_prob = value
+
     def load_config(self, path: str) -> dict:
         with open(path, 'r') as file:
             config = yaml.load(file, Loader=yaml.FullLoader)
