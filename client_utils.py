@@ -6,6 +6,7 @@ import random
 import socket
 
 import sys
+import copy
 import threading
 import time
 
@@ -31,6 +32,10 @@ class Client:
         self.global_snapshots = []
         self.global_snapshot = None
         self.global_snapshots_flag = {}
+
+        self.stop_udp_thread = False
+        self.init_udp_recv_settings()
+        self.start_listening()
 
         pass
 
@@ -131,14 +136,17 @@ class Client:
         initiator = payload['initiator']
         sender = payload['sender']
 
-        if initiator not in self.channel_flag:
+        if initiator not in self.channel_flag.keys():
+            print(f"First MARKER initiated by {initiator} from {sender}.")
             self.prepare_channels(initiator, sender)
             self.snapshots[initiator]['my_state'] = self.token
             self.broadcast_marker(initiator)
         else:
+            print(f"Consequential MARKER initiated by {initiator} from {sender}.")
             self.channel_flag[initiator][sender] = True
-            if all(self.channel_flag[initiator]):
-                self.summarize_snapshot(initiator)
+
+        if all(self.channel_flag[initiator].values()):
+            self.summarize_snapshot(initiator)
 
     def broadcast_marker(self, initiator: str):
         payload = {
@@ -156,12 +164,13 @@ class Client:
 
     def prepare_channels(self, initiator: str, sender: str):
         new_flag = {}
-        new_queue = queue.Queue()
+        new_queue = []
         for in_channel in self.in_list:
             new_flag[in_channel] = False
         new_flag[sender] = True
 
         self.channel_flag[initiator] = new_flag
+        self.snapshots[initiator] = {}
         self.snapshots[initiator]['channels'] = new_queue
         self.snapshots[initiator]['creator'] = self.username
 
@@ -172,6 +181,7 @@ class Client:
             if all(self.global_snapshots_flag.values()):
                 print("All local snapshots collected! Global snapshot done!")
                 self.global_snapshots.append(self.global_snapshot)
+                self.display_global_snapshots()
 
         else:
             self.display_snapshot(initiator)
@@ -197,11 +207,12 @@ class Client:
         print()
 
     def display_global_snapshots(self):
-        for k, v in self.global_snapshot.items():
+        global_snapshot_copy = copy.deepcopy(self.global_snapshot)
+        for k, v in global_snapshot_copy.items():
             print(f"Snapshot of client {k}:")
-            print(f"Local state: {v['my_state']}")
-            while not v['channels'].empty():
-                msg = v['channels'].pop()
+            print(f"Local state: {self.holds_token(v['my_state'])}")
+            while v['channels']:
+                msg = v['channels'].pop(0)
                 if msg['type'] == 'token':
                     print(f"Channel [{msg['from']}] --> [{k}]: {self.holds_token(True)}")
 
@@ -210,8 +221,9 @@ class Client:
         for c in self.in_list:
             ret[c] = False
 
-        while not self.snapshots[initiator]['channels'].empty():
-            message = self.snapshots[initiator]['channels'].get()
+        snapshot = copy.deepcopy(self.snapshots[initiator])
+        while snapshot['channels']:
+            message = snapshot['channels'].pop(0)
             if message['type'] == 'token':
                 ret[message['from']] = True
 
@@ -224,6 +236,7 @@ class Client:
         if all(self.global_snapshots_flag.values()):
             print("All local snapshots collected! Global snapshot done!")
             self.global_snapshots.append(self.global_snapshot)
+            self.display_global_snapshots()
 
     def holds_token(self, state: bool):
         if state:
@@ -296,7 +309,7 @@ class Client:
         sender = message['from']
         for initiator in self.snapshots.keys():
             if self.channel_flag[initiator][sender] == False:
-                self.snapshots[initiator]['channels'].put(message)
+                self.snapshots[initiator]['channels'].append(message)
                 print(f"==>Put the {message['type']} message from {sender} into the queue of {initiator}!")
 
     def process_recv_data(self, data):
@@ -320,10 +333,6 @@ class Client:
             payload = data['item']
             payload = json.loads(payload)
             self.process_snapshot(payload)
-        elif data['type'] == 'server-balance':
-            pass
-        elif data['type'] == 'server-status':
-            pass
 
 
 if __name__ == '__main__':
